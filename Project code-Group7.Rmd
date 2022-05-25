@@ -1,0 +1,208 @@
+---
+title: "EEB313 term project"
+Author: "Yuan Xiao, Advait Sridhar, Xi Nan"
+date: 14/12/2021
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(lme4)
+library(lmerTest)
+library(ggalt)
+```
+
+```{r setup}
+knitr::opts_knit$set(root.dir="~/Desktop/School/EEB313/Term project")
+```
+
+```{r}
+ontario <- read.csv("Ontario.csv")
+erie <- read.csv("Erie.csv")
+ontario
+erie
+```
+
+## Transform data -- gather species names into one column and create a separate abundance column for each species ##
+```{r}
+ontario_long<- ontario %>%
+  gather(key= species, value= species_catch, Lake.Whitefish, Yellow.Perch, Freshwater.Drum, Walleye) 
+
+erie_long<- erie %>%
+  gather(key= species, value= species_catch, Lake.Whitefish, Yellow.Perch, Freshwater.Drum, Walleye) 
+```
+
+Get actual abundance of each species by dividing species_catch, which is given in thousands of pounds, by the average weight of each species and multiplying by 1000.
+```{r}
+#Create new columns for the abundance of each species
+ontario_long <- ontario_long %>%
+  spread(key= species, value= species_catch) %>%
+  mutate(Freshwater.Drum_catch= (Freshwater.Drum*1000/5)) %>%
+  mutate(Lake.Whitefish_catch= (Lake.Whitefish*1000/3)) %>%
+  mutate(Walleye_catch= (Walleye*1000/2)) %>%
+  mutate(Yellow.Perch_catch= (Yellow.Perch*1000/0.75)) %>%
+  gather(key= species, value= species_catch, Freshwater.Drum_catch, Lake.Whitefish_catch, Walleye_catch, Yellow.Perch_catch)
+ontario_long
+```
+
+```{r}
+#Create new columns for abundance of each species
+erie_long <- erie_long %>%
+  spread(key= species, value= species_catch) %>%
+  mutate(Freshwater.Drum_catch= (Freshwater.Drum*1000/5)) %>%
+  mutate(Lake.Whitefish_catch= (Lake.Whitefish*1000/3)) %>%
+  mutate(Walleye_catch= (Walleye*1000/2)) %>%
+  mutate(Yellow.Perch_catch= (Yellow.Perch*1000/0.75)) %>%
+  gather(key= species, value= species_catch, Freshwater.Drum_catch, Lake.Whitefish_catch, Walleye_catch, Yellow.Perch_catch)
+erie_long
+```
+
+```{r}
+# combine both datasets into one 
+lakes_long<- rbind(ontario_long, erie_long) 
+lakes_long$LakeName <- as.factor(lakes_long$LakeName)
+lakes_long$species <- as.factor(lakes_long$species)
+lakes_long
+```
+
+## Graph chlorophyll and temperature over time ##
+```{r}
+#plot chlorophyll level line graph of the two lakes
+lakes_long %>% 
+  ggplot(aes(x=Year, y=`Avg..Chl.`, color=LakeName))+
+  geom_line()+
+  ggtitle("Yearly Chlorophll Levels of Lake Ontario and Lake Erie from 1995 to 2011")
+
+#plot temperature line graph of two lakes 
+lakes_long %>% 
+  ggplot(aes(x=Year, y=`Avg..Temp.`, color=LakeName))+
+  geom_line()+
+  ggtitle("Yearly Temperature Levels of Lake Ontario and Lake Erie from 1995 to 2011")
+```
+
+## Graph abundance over time ##
+
+```{r}
+#plot species abundance line graph of Lake Ontario
+ontario_long %>% 
+  ggplot(aes(x=Year, y= log10(species_catch), color=species))+
+  geom_line()+
+  ggtitle("Abundance of Four Species on Lake Ontario from 1995 to 2011")
+
+#plot species abundance line graph of Lake Erie
+erie_long %>% 
+  ggplot(aes(x=Year, y= log10(species_catch), color=species))+
+  geom_line()+
+  ggtitle("Abundance of Four Species on Lake Erie from 1995 to 2011")  
+```
+
+
+## Separate linear models for temperature and chlorophyll ##
+
+```{r}
+# Model for chlorophyll and abundance
+lakes_lmChl <- lmer(log10(species_catch) ~ Avg..Chl.*species + (1|LakeName), data= lakes_long, REML=FALSE)
+summary(lakes_lmChl)
+```
+
+```{r}
+# Test assumptions of linear model
+lm_lakes_long_chl <- lm(log10(species_catch) ~ Avg..Chl. * species, data = lakes_long) #creating linear model with lm() because plot function doesn't work on lmer objects
+plot(lm_lakes_long_chl, 1:2) #testing assumptions for Avg..Chl.*species interaction
+```
+
+```{r}
+#ANOVA table
+lakes_anova<- Anova(lmer(log10(species_catch) ~ Avg..Chl.*species + (1|LakeName), data= lakes_long), type=3)
+lakes_anova
+```
+
+```{r}
+#aov object for Tukey test
+lakes_aovChl<- aov(log10(species_catch) ~ Avg..Chl.*species, data= lakes_long)
+summary(lakes_aovChl)
+```
+
+```{r}
+#Tukey test
+Tukey<- TukeyHSD(lakes_aovChl)
+Tukey
+```
+
+```{r}
+# graph for tukey test
+par(mar=c(5, 19, 5, 5))
+plot(Tukey, las=1)
+```
+
+```{r}
+# Add model predictions to data frame
+lakes_long <- lakes_long %>%
+  mutate(pred_Chl= predict(lakes_lmChl))
+
+# plot for chlorophyll
+ggplot(lakes_long, aes(x = Avg..Chl., y = log10(species_catch), colour = species)) +
+  geom_abline(aes(intercept = 3.72, slope = 80.65), size = 2) +       # Add the intercept and estimate for chlorophyll from the model
+  geom_line(aes(y= pred_Chl), size = 1) +
+  geom_point(size = 2) + 
+  facet_wrap(~species) +
+  ylab("log10(Species abundance)") +
+  xlab("Average chlorophyll concentration (mg/L)")
+```
+
+```{r}
+# Model for temperature and abundance
+lakes_lmTemp <- lmer(log10(species_catch) ~ Avg..Temp.*species + (1|LakeName), data= lakes_long, REML=FALSE)
+summary(lakes_lmTemp)
+```
+
+```{r}
+# Test assumptions for linear model
+lm_lakes_long_Temp <- lm(log10(species_catch) ~ Avg..Chl. * species, data = lakes_long) #creating linear model with lm() because plot function doesn't work on lmer objects
+plot(lm_lakes_long_Temp, 1:2) 
+```
+
+```{r}
+# Add model predictions to the data frame
+lakes_long <- lakes_long %>%
+  mutate(pred_Temp= predict(lakes_lmTemp))
+
+# Graph the results of the temperature model
+ggplot(lakes_long, aes(x = Avg..Temp., y = log10(species_catch), colour = species)) +
+  geom_abline(aes(intercept = 7.339916, slope = -0.31024), size = 2) +       
+  #geom_smooth(method="lm", size = 1) +
+  geom_line(aes(y= pred_Temp), size = 1) +
+  geom_point(size = 2) + 
+  facet_wrap(~species) +
+  ylab("log10(Species abundance)") +
+  xlab("Average surface temperature (°C)")
+```
+
+```{r}
+# Anova table for temperature model 
+lakes_anovatemp <- Anova(lmer(log10(species_catch) ~ Avg..Temp.*species + (1|LakeName), data= lakes_long), type=3)
+lakes_anovatemp
+```
+
+```{r}
+# create aov object for the Tukey test
+lakes_aovTemp<- aov(log10(species_catch) ~ Avg..Temp.*species, data= lakes_long)
+summary(lakes_aovTemp)
+```
+
+```{r}
+# Tukey test
+Tukey2 <- TukeyHSD(lakes_aovTemp)
+Tukey2
+```
+
+```{r}
+# graph for tukey test
+par(mar=c(5, 19, 5, 5))
+plot(Tukey2, las=1)
+```
+
+
+
